@@ -114,6 +114,25 @@ void test_zstream__chunked_input(void)
 	git_str_dispose(&deflated);
 }
 
+void test_zstream__inflatebuf_fails_on_truncated_input(void)
+{
+	git_str deflated = GIT_STR_INIT, inflated = GIT_STR_INIT;
+
+	/* compress a simple string */
+	cl_git_pass(git_zstream_deflatebuf(&deflated, data, strlen(data) + 1));
+	cl_assert(deflated.size > 2);
+
+	/* truncated to just the two-byte zlib header */
+	cl_git_fail(git_zstream_inflatebuf(&inflated, deflated.ptr, 2));
+	git_str_dispose(&inflated);
+
+	/* truncated in the middle of the stream */
+	cl_git_fail(git_zstream_inflatebuf(&inflated, deflated.ptr, deflated.size - 2));
+
+	git_str_dispose(&deflated);
+	git_str_dispose(&inflated);
+}
+
 void test_zstream__truncated_input(void)
 {
 	git_str deflated = GIT_STR_INIT;
