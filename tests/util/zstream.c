@@ -76,6 +76,93 @@ void test_zstream__fails_on_trailing_garbage(void)
 	git_str_dispose(&inflated);
 }
 
+void test_zstream__chunked_input(void)
+{
+	git_str deflated = GIT_STR_INIT;
+	git_zstream z = GIT_ZSTREAM_INIT;
+	char out[128], *outp = out;
+	size_t outlen, in_pos, in_chunk = 0, total = 0;
+
+	/* compress a simple string */
+	cl_git_pass(git_zstream_deflatebuf(&deflated, data, strlen(data) + 1));
+	cl_assert(deflated.size > 8);
+
+	/*
+	 * feed the stream a couple of bytes at a time, as pack streaming
+	 * (git_packfile_stream_read) does with its mmap windows: an
+	 * iteration that consumes input without producing output only
+	 * means more input is needed, not that the stream is broken
+	 */
+	cl_git_pass(git_zstream_init(&z, GIT_ZSTREAM_INFLATE));
+
+	for (in_pos = 0; in_pos < deflated.size; in_pos += in_chunk - z.in_len) {
+		in_chunk = min(2, deflated.size - in_pos);
+		cl_git_pass(git_zstream_set_input(&z, deflated.ptr + in_pos, in_chunk));
+
+		outlen = sizeof(out) - total;
+		cl_git_pass(git_zstream_get_output_chunk(outp, &outlen, &z));
+
+		outp += outlen;
+		total += outlen;
+	}
+
+	cl_assert(git_zstream_eos(&z));
+	cl_assert_equal_sz(strlen(data) + 1, total);
+	cl_assert(memcmp(data, out, total) == 0);
+
+	git_zstream_free(&z);
+	git_str_dispose(&deflated);
+}
+
+void test_zstream__inflatebuf_fails_on_truncated_input(void)
+{
+	git_str deflated = GIT_STR_INIT, inflated = GIT_STR_INIT;
+
+	/* compress a simple string */
+	cl_git_pass(git_zstream_deflatebuf(&deflated, data, strlen(data) + 1));
+	cl_assert(deflated.size > 2);
+
+	/* truncated to just the two-byte zlib header */
+	cl_git_fail(git_zstream_inflatebuf(&inflated, deflated.ptr, 2));
+	git_str_dispose(&inflated);
+
+	/* truncated in the middle of the stream */
+	cl_git_fail(git_zstream_inflatebuf(&inflated, deflated.ptr, deflated.size - 2));
+
+	git_str_dispose(&deflated);
+	git_str_dispose(&inflated);
+}
+
+void test_zstream__truncated_input(void)
+{
+	git_str deflated = GIT_STR_INIT;
+	git_zstream z = GIT_ZSTREAM_INIT;
+	char out[128];
+	size_t outlen;
+
+	/* compress a simple string */
+	cl_git_pass(git_zstream_deflatebuf(&deflated, data, strlen(data) + 1));
+	cl_assert(deflated.size > 2);
+
+	/* truncated to just the two-byte zlib header, which is
+	 * consumed without producing any output */
+	cl_git_pass(git_zstream_init(&z, GIT_ZSTREAM_INFLATE));
+	cl_git_pass(git_zstream_set_input(&z, deflated.ptr, 2));
+
+	outlen = sizeof(out);
+	cl_git_pass(git_zstream_get_output_chunk(out, &outlen, &z));
+	cl_assert_equal_sz(0, outlen);
+	cl_assert(!git_zstream_eos(&z));
+
+	/* input is exhausted, so no forward progress is possible and
+	 * retrying cannot ever succeed: the truncated stream is an error */
+	outlen = sizeof(out);
+	cl_git_fail(git_zstream_get_output_chunk(out, &outlen, &z));
+
+	git_zstream_free(&z);
+	git_str_dispose(&deflated);
+}
+
 void test_zstream__buffer(void)
 {
 	git_str out = GIT_STR_INIT;
