@@ -133,6 +133,22 @@ int git_zstream_get_output_chunk(
 
 	*out_len = (out_queued - zstream->z.avail_out);
 
+	/*
+	 * Z_BUF_ERROR when nothing was consumed and nothing was produced,
+	 * despite room in the output buffer, means no forward progress is
+	 * possible: the stream was truncated. Fail instead of having
+	 * callers that loop until end-of-stream retry forever. (When some
+	 * input was consumed or the output buffer was filled, Z_BUF_ERROR
+	 * only signals that another iteration is needed.)
+	 */
+	if (zstream->zerr == Z_BUF_ERROR &&
+	    in_used == 0 &&
+	    *out_len == 0 &&
+	    out_queued > 0) {
+		git_error_set(GIT_ERROR_ZLIB, "premature end of compressed stream");
+		return -1;
+	}
+
 	return 0;
 }
 

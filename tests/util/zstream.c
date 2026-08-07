@@ -136,13 +136,9 @@ void test_zstream__truncated_input(void)
 	cl_assert(!git_zstream_eos(&z));
 
 	/* input is exhausted, so no forward progress is possible and
-	 * retrying cannot ever succeed; this is nevertheless reported
-	 * as success with no output, so a caller looping until
-	 * end-of-stream loops forever */
+	 * retrying cannot ever succeed: the truncated stream is an error */
 	outlen = sizeof(out);
-	cl_git_pass(git_zstream_get_output_chunk(out, &outlen, &z));
-	cl_assert_equal_sz(0, outlen);
-	cl_assert(!git_zstream_eos(&z));
+	cl_git_fail(git_zstream_get_output_chunk(out, &outlen, &z));
 
 	git_zstream_free(&z);
 	git_str_dispose(&deflated);
